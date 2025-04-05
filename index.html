@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Face-API.js Emotion Detection</title>
+  <!-- Load libraries in the head with defer attribute -->
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.4.5/hls.min.js"></script>
+  <script defer src="https://unpkg.com/face-api.js@latest/dist/face-api.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Arial', sans-serif;
+      background-color: #121212;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    
+    .header {
+      width: 100%;
+      background-color: #333;
+      padding: 15px 0;
+      text-align: center;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+    }
+    
+    .container {
+      width: 90%;
+      max-width: 1280px;
+      margin: 20px auto;
+      position: relative;
+    }
+    
+    .video-container {
+      position: relative;
+      margin-bottom: 20px;
+      box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    
+    #videoElement {
+      width: 100%;
+      display: block;
+    }
+    
+    #overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    
+    .controls {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 20px;
+      gap: 10px;
+    }
+    
+    button {
+      padding: 10px 15px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background-color 0.3s;
+    }
+    
+    button:hover {
+      background-color: #3e8e41;
+    }
+    
+    button:disabled {
+      background-color: #888;
+      cursor: not-allowed;
+    }
+    
+    .status {
+      background-color: #333;
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    
+    .emotion-stats {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-around;
+      gap: 20px;
+      margin-top: 20px;
+    }
+    
+    .face-card {
+      background-color: #333;
+      border-radius: 8px;
+      padding: 15px;
+      min-width: 250px;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+    }
+    
+    .face-title {
+      font-size: 18px;
+      margin-top: 0;
+      margin-bottom: 15px;
+      color: #4CAF50;
+      border-bottom: 1px solid #555;
+      padding-bottom: 8px;
+    }
+    
+    .emotion-bar {
+      height: 20px;
+      background-color: #4CAF50;
+      margin-bottom: 10px;
+      border-radius: 3px;
+      transition: width 0.3s;
+    }
+    
+    .emotion-label {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 5px;
+    }
+    
+    .loading {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(0, 0, 0, 0.8);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+    
+    .spinner {
+      border: 5px solid #f3f3f3;
+      border-top: 5px solid #4CAF50;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 20px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="loading" id="loading">
+    <div class="spinner"></div>
+    <div id="loadingText">Loading libraries...</div>
+  </div>
+
+  <div class="header">
+    <h1>Live Stream Emotion Detection with face-api.js</h1>
+  </div>
+  
+  <div class="container">
+    <div class="status" id="status">Initializing...</div>
+    
+    <div class="controls">
+      <button id="startBtn">Start Detection</button>
+      <button id="stopBtn" disabled>Stop Detection</button>
+      <button id="fullscreenBtn">Fullscreen</button>
+    </div>
+    
+    <div class="video-container">
+      <video id="videoElement" autoplay muted playsinline></video>
+      <canvas id="overlay"></canvas>
+    </div>
+    
+    <div class="emotion-stats" id="emotionStats"></div>
+  </div>
+
+  <script>
+    // Check if libraries are loaded properly
+    function checkLibraries() {
+      if (typeof faceapi === 'undefined') {
+        console.error('face-api.js is not loaded!');
+        document.getElementById('loadingText').textContent = 'Error: face-api.js library not loaded! Please check console.';
+        return false;
+      }
+      
+      if (typeof Hls === 'undefined') {
+        console.error('hls.js is not loaded!');
+        document.getElementById('loadingText').textContent = 'Error: hls.js library not loaded! Please check console.';
+        return false;
+      }
+      
+      return true;
+    }
+
+    // Wait for DOM content and scripts to fully load
+    document.addEventListener('DOMContentLoaded', () => {
+      const loadingText = document.getElementById('loadingText');
+      loadingText.textContent = 'Waiting for libraries to load...';
+      
+      // Give time for scripts to load
+      setTimeout(() => {
+        if (checkLibraries()) {
+          loadingText.textContent = 'Libraries loaded! Initializing...';
+          initApp();
+        }
+      }, 1000); // Wait 1 second to ensure libraries are loaded
+    });
+
+    // Initialize application
+    function initApp() {
+      // DOM Elements
+      const videoElement = document.getElementById('videoElement');
+      const overlay = document.getElementById('overlay');
+      const overlayCtx = overlay.getContext('2d');
+      const status = document.getElementById('status');
+      const startBtn = document.getElementById('startBtn');
+      const stopBtn = document.getElementById('stopBtn');
+      const fullscreenBtn = document.getElementById('fullscreenBtn');
+      const emotionStats = document.getElementById('emotionStats');
+      const loading = document.getElementById('loading');
+      const loadingText = document.getElementById('loadingText');
+      
+      // HLS Stream URL (update as needed)
+
+      const streamUrl = "https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8";
+      
+      // App state
+      let isDetectionRunning = false;
+      let detectionInterval;
+      
+      // Emotion colors for visualization
+      const emotionColors = {
+        neutral: '#A9A9A9',
+        happy: '#FFD700',
+        sad: '#6495ED',
+        angry: '#FF6347',
+        fearful: '#9932CC',
+        disgusted: '#8FBC8F',
+        surprised: '#FF69B4'
+      };
+      
+      // Initialize face-api.js
+      async function initFaceAPI() {
+        loadingText.textContent = 'Loading face-api models...';
+        
+        try {
+          // Log model loading process
+          console.log('Loading face detection model...');
+          await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+          console.log('Face detection model loaded successfully');
+          
+          console.log('Loading face expression model...');
+          await faceapi.nets.faceExpressionNet.loadFromUri('/models');
+          console.log('Face expression model loaded successfully');
+          
+          loadingText.textContent = 'Models loaded! Initializing stream...';
+          initializeStream();
+        } catch (error) {
+          console.error('Error loading models:', error);
+          loadingText.textContent = `Error loading models: ${error.message}`;
+          status.textContent = `Failed to load models: ${error.message}`;
+        }
+      }
+      
+      // Initialize HLS video stream
+      function initializeStream() {
+        if (Hls.isSupported()) {
+          const hls = new Hls({
+            debug: false,
+            enableWorker: true,
+            lowLatencyMode: true,
+          });
+          
+          hls.loadSource(streamUrl);
+          hls.attachMedia(videoElement);
+          
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            status.textContent = 'Stream ready! Click "Start Detection" to begin.';
+            loading.style.display = 'none';
+          });
+          
+          hls.on(Hls.Events.ERROR, (event, data) => {
+            if (data.fatal) {
+              status.textContent = `Stream error: ${data.type}`;
+              console.error('Stream error:', data);
+            }
+          });
+        } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+          // For Safari
+          videoElement.src = streamUrl;
+          videoElement.addEventListener('loadedmetadata', () => {
+            status.textContent = 'Stream ready! Click "Start Detection" to begin.';
+            loading.style.display = 'none';
+          });
+        } else {
+          status.textContent = 'HLS is not supported in your browser.';
+          loading.style.display = 'none';
+        }
+      }
+      
+      // Resize overlay canvas to match video dimensions
+      function resizeCanvas() {
+        const { videoWidth, videoHeight } = videoElement;
+        const { width, height } = videoElement.getBoundingClientRect();
+        
+        overlay.width = width;
+        overlay.height = height;
+        
+        return {
+          width,
+          height,
+          scaleX: width / videoWidth,
+          scaleY: height / videoHeight
+        };
+      }
+      
+      // Start face detection
+      async function startDetection() {
+        if (isDetectionRunning) return;
+        
+        isDetectionRunning = true;
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        status.textContent = 'Running emotion detection...';
+        
+        // Detection options
+        const options = new faceapi.TinyFaceDetectorOptions({
+          inputSize: 416,
+          scoreThreshold: 0.5
+        });
+        
+        // Ensure video is fully loaded and playable
+        if (videoElement.readyState < 4) { // 4 means HAVE_ENOUGH_DATA
+          await new Promise(resolve => {
+            videoElement.oncanplaythrough = () => {
+              console.log('Video is ready to play');
+              resolve();
+            };
+          });
+        }
+        
+        // Ensure the video is playing
+        if (videoElement.paused) {
+          await videoElement.play().catch(error => {
+            console.error('Error playing video:', error);
+            status.textContent = 'Error playing video. Please ensure the stream is accessible.';
+            isDetectionRunning = false;
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            return;
+          });
+        }
+        
+        // Start detection loop
+        detectionInterval = setInterval(async () => {
+          try {
+            // Detect faces with expressions
+            const detections = await faceapi.detectAllFaces(
+              videoElement, 
+              new faceapi.TinyFaceDetectorOptions()
+            ).withFaceExpressions();
+            
+            // Clear previous drawings
+            const dimensions = resizeCanvas();
+            overlayCtx.clearRect(0, 0, dimensions.width, dimensions.height);
+            
+            // Draw results
+            if (detections && detections.length > 0) {
+              drawDetections(detections, dimensions);
+              updateEmotionStats(detections);
+            } else {
+              emotionStats.innerHTML = '<div class="face-card"><h3 class="face-title">No faces detected</h3></div>';
+            }
+          } catch (error) {
+            console.error('Detection error:', error);
+          }
+        }, 200); // Run detection every 200ms
+      }
+      
+      // Stop face detection
+      function stopDetection() {
+        clearInterval(detectionInterval);
+        isDetectionRunning = false;
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        status.textContent = 'Detection stopped.';
+        
+        // Clear overlay
+        const dimensions = resizeCanvas();
+        overlayCtx.clearRect(0, 0, dimensions.width, dimensions.height);
+      }
+      
+      // Draw detections on canvas
+      function drawDetections(detections, dimensions) {
+        detections.forEach(detection => {
+          const { box, expressions } = detection;
+          
+          // Check if box and expressions exist
+          if (!box || !expressions) {
+            console.warn('Invalid detection object:', detection);
+            return; // Skip this detection
+          }
+          
+          // Scale detection box to match current video size
+          const scaledBox = {
+            x: box.x * dimensions.scaleX,
+            y: box.y * dimensions.scaleY,
+            width: box.width * dimensions.scaleX,
+            height: box.height * dimensions.scaleY
+          };
+          
+          // Get dominant emotion
+          const dominantEmotion = Object.entries(expressions).reduce(
+            (max, [emotion, probability]) => probability > max[1] ? [emotion, probability] : max, 
+            ['', 0]
+          );
+          
+          // Draw face box
+          overlayCtx.lineWidth = 3;
+          overlayCtx.strokeStyle = emotionColors[dominantEmotion[0]] || '#4CAF50';
+          overlayCtx.strokeRect(scaledBox.x, scaledBox.y, scaledBox.width, scaledBox.height);
+          
+          // Draw background for text
+          overlayCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+          overlayCtx.fillRect(
+            scaledBox.x,
+            scaledBox.y - 30,
+            scaledBox.width,
+            30
+          );
+          
+          // Draw emotion text
+          overlayCtx.fillStyle = '#fff';
+          overlayCtx.font = '18px Arial';
+          overlayCtx.fillText(
+            `${dominantEmotion[0]} (${Math.round(dominantEmotion[1] * 100)}%)`,
+            scaledBox.x + 5,
+            scaledBox.y - 8
+          );
+        });
+      }
+      
+      // Update emotion statistics display
+      function updateEmotionStats(detections) {
+        emotionStats.innerHTML = '';
+        
+        detections.forEach((detection, index) => {
+          const { expressions } = detection;
+          
+          // Create face card element
+          const faceCard = document.createElement('div');
+          faceCard.className = 'face-card';
+          
+          // Add title
+          const title = document.createElement('h3');
+          title.className = 'face-title';
+          title.textContent = `Face ${index + 1}`;
+          faceCard.appendChild(title);
+          
+          // Sort emotions by probability (descending)
+          const sortedEmotions = Object.entries(expressions)
+            .sort((a, b) => b[1] - a[1]);
+          
+          // Add emotion bars
+          sortedEmotions.forEach(([emotion, probability]) => {
+            const percentage = Math.round(probability * 100);
+            
+            // Skip tiny probabilities
+            if (percentage < 1) return;
+            
+            // Create emotion label
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'emotion-label';
+            
+            const emotionName = document.createElement('span');
+            emotionName.textContent = emotion;
+            
+            const emotionValue = document.createElement('span');
+            emotionValue.textContent = `${percentage}%`;
+            
+            labelDiv.appendChild(emotionName);
+            labelDiv.appendChild(emotionValue);
+            
+            // Create emotion bar
+            const barDiv = document.createElement('div');
+            barDiv.className = 'emotion-bar';
+            barDiv.style.width = `${percentage}%`;
+            barDiv.style.backgroundColor = emotionColors[emotion] || '#4CAF50';
+            
+            // Add to face card
+            faceCard.appendChild(labelDiv);
+            faceCard.appendChild(barDiv);
+          });
+          
+          emotionStats.appendChild(faceCard);
+        });
+      }
+      
+      // Make video fullscreen
+      function toggleFullscreen() {
+        const container = document.querySelector('.video-container');
+        
+        if (!document.fullscreenElement) {
+          if (container.requestFullscreen) {
+            container.requestFullscreen();
+          } else if (container.webkitRequestFullscreen) {
+            container.webkitRequestFullscreen();
+          } else if (container.msRequestFullscreen) {
+            container.msRequestFullscreen();
+          }
+        } else {
+          if (document.exitFullscreen) {
+            document.exitFullscreen();
+          } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+          } else if (document.msExitFullscreen) {
+            document.msExitFullscreen();
+          }
+        }
+      }
+      
+      // Event listeners
+      videoElement.addEventListener('play', resizeCanvas);
+      window.addEventListener('resize', resizeCanvas);
+      startBtn.addEventListener('click', startDetection);
+      stopBtn.addEventListener('click', stopDetection);
+      fullscreenBtn.addEventListener('click', toggleFullscreen);
+      
+      // Start initialization
+      initFaceAPI();
+    }
+  </script>
+</body>
+</html>
